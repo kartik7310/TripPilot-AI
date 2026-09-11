@@ -2,7 +2,7 @@ import os
 import sys
 from typing import TypedDict, Annotated
 import operator
-
+import asyncio
 # Set UTF-8 encoding for Windows terminal output
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -19,8 +19,9 @@ from langchain_core.messages import (
 
 from langchain_groq import ChatGroq
 
-from tools.tavily_tool import tavily_search
-from tools.flight_tool import search_flights
+# from tools.tavily_tool import tavily_search
+from mcp_client import tevely_mcp_search
+from tools.flight_tool import search_flights    
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -58,7 +59,8 @@ def search_flight_agent(state: travelState):
 # hotel node
 def hotel_agent(state: travelState):
     query = f"Best hotels for {state['user_query']}"
-    hotel_results = tavily_search(query)
+    # hotel_results = tavily_search(query)
+    hotel_results = asyncio.run(tevely_mcp_search(query))
 
     return {
         "hotel_results": hotel_results,
