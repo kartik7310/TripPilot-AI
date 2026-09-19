@@ -21,8 +21,7 @@ from langchain_core.messages import (
 from langchain_groq import ChatGroq
 
 # from tools.tavily_tool import tavily_search
-from mcp_client import tevely_mcp_search,get_airports,get_airlines,aviation_mcp_call
-from tools.flight_tool import search_flights    
+from mcp_client import tevely_mcp_search,aviation_mcp_call,extract_destination,forecast_mcp_search,weather_mcp_search  
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -82,7 +81,7 @@ Generate:
 Return concise travel guidance.
 """
 
-async def search_flight_agent(state:travelState):
+def search_flight_agent(state: travelState):
      print("\nINSIDE FLIGHT AGENT\n")
      query = state["user_query"]
      
@@ -115,7 +114,7 @@ async def search_flight_agent(state:travelState):
     
      return {
             "flight_results": flight_data,
-             "messages": [
+            "messages": [
             AIMessage(
                 content="Flight recommendations generated"
             )
@@ -136,6 +135,36 @@ def hotel_agent(state: travelState):
         ],
         "llm_calls": state.get("llm_calls", 0) + 1
     }
+
+
+def weather_agent(state: travelState):
+
+    city = extract_destination(state["user_query"])
+
+    weather_data = asyncio.run(
+        weather_mcp_search(city)
+    )
+
+    forecast_data = asyncio.run(
+        forecast_mcp_search(city)
+    )
+
+    return {
+        "weather_results": f"""
+        Current Weather:
+        {weather_data}
+
+        Forecast:
+        {forecast_data}
+        """,
+        "messages": [
+            AIMessage(
+                content="Weather information fetched"
+            )
+        ]
+    }
+
+
 
 
 # Itinerary node
@@ -167,44 +196,19 @@ def itinerary_agent(state: travelState):
     }
 
 
-# Final Response Agent
-def final_agent(state: travelState):
-
-    final_prompt = f"""
-    Generate final travel response.
-
-    Flights:
-    {state['flight_results']}
-
-    Hotels:
-    {state['hotel_results']}
-
-    Itinerary:
-    {state['itinerary']}
-    """
-
-    response = llm.invoke([
-        HumanMessage(content=final_prompt)
-    ])
-
-    return {
-        "messages": [response],
-        "llm_calls": state.get("llm_calls", 0) + 1
-    }
-
 # creating the graph
 graph = StateGraph(travelState)
 
 graph.add_node("flight_agent", search_flight_agent)
 graph.add_node("hotel_agent", hotel_agent)
+graph.add_node("weather_agent", weather_agent)
 graph.add_node("itinerary_agent", itinerary_agent)
-graph.add_node("final_agent", final_agent)
 
 graph.add_edge(START, "flight_agent")
 graph.add_edge("flight_agent", "hotel_agent")
-graph.add_edge("hotel_agent", "itinerary_agent")
-graph.add_edge("itinerary_agent", "final_agent")
-graph.add_edge("final_agent", END)
+graph.add_edge("hotel_agent", "weather_agent")
+graph.add_edge("weather_agent", "itinerary_agent")
+graph.add_edge("itinerary_agent", END)
 
 # memory checkpointer with postgreSql
 _conn = psycopg.connect(DATABASE_URL, autocommit=True)
