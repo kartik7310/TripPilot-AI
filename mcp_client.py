@@ -17,6 +17,19 @@ client = MultiServerMCPClient(
             "transport": "streamable_http",
             "url": f"https://mcp.tavily.com/mcp/?tavilyApiKey={TAVILY_API_KEY}"
         },
+         "aviationstack": {
+            "transport": "stdio",
+            "command": r"C:\Users\karti\OneDrive\Desktop\travel-plan-agent-mcp\aviationstack-mcp\.venv\Scripts\python.exe",
+            "args": [
+                "-m",
+                "aviationstack_mcp",
+                "mcp",
+                "run"
+            ],
+            "env": {
+                "AVIATION_STACK_API_KEY": AVIATION_STACK_API_KEY
+            }
+        }
      }
 
 )

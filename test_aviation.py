@@ -13,7 +13,7 @@ client = MultiServerMCPClient(
     {
         "aviationstack": {
             "transport": "stdio",
-            "command": r"E:\Multi_agent_system_with_MCP\aviationstack-mcp\.venv\Scripts\python.exe",
+            "command": r"C:\Users\karti\OneDrive\Desktop\travel-plan-agent-mcp\aviationstack-mcp\.venv\Scripts\python.exe",
             "args": [
                 "-m",
                 "aviationstack_mcp",
