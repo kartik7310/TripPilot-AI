@@ -39,6 +39,7 @@ class travelState(TypedDict):
     user_query: str
     flight_results: str
     hotel_results: str
+    weather_results: str
     itinerary: str
     llm_calls: int
     
@@ -180,6 +181,9 @@ def itinerary_agent(state: travelState):
 
     Hotel Results:
     {state['hotel_results']}
+
+    Weather Forecast:
+    {state.get('weather_results', 'Weather data not available')}
     """
 
     response = llm.invoke([
@@ -220,45 +224,58 @@ checkpointer.setup()
 app = graph.compile(checkpointer=checkpointer)
 
 if __name__ == "__main__":
+    is_streamlit = False
+    try:
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+        if get_script_run_ctx() is not None:
+            is_streamlit = True
+    except Exception:
+        pass
 
-    config = {
-        "configurable": {
-            "thread_id": "user_kartik"
+    if is_streamlit:
+        import runpy
+        app_file = os.path.join(os.path.dirname(__file__), "app.py")
+        runpy.run_path(app_file, run_name="__main__")
+    else:
+        config = {
+            "configurable": {
+                "thread_id": "user_kartik"
+            }
         }
-    }
 
-    print("Travel Agent started. Type 'exit' to stop.\n")
+        print("Travel Agent started. Type 'exit' to stop.\n")
 
-    while True:
+        while True:
 
-        user_input = input("You: ").strip()
+            user_input = input("You: ").strip()
 
-        if user_input.lower() in ["exit", "quit", "stop"]:
-            print("Goodbye!")
-            break
+            if user_input.lower() in ["exit", "quit", "stop"]:
+                print("Goodbye!")
+                break
 
-        if not user_input:
-            continue
+            if not user_input:
+                continue
 
-        for chunk in app.stream(
-            {
-                "messages": [
-                    HumanMessage(content=user_input)
-                ],
-                "user_query": user_input,
-                "flight_results": "",
-                "hotel_results": "",
-                "itinerary": "",
-                "llm_calls": 0
-            },
-            config=config,
-            stream_mode="messages"
-        ):
-            message, metadata = chunk
+            for chunk in app.stream(
+                {
+                    "messages": [
+                        HumanMessage(content=user_input)
+                    ],
+                    "user_query": user_input,
+                    "flight_results": "",
+                    "hotel_results": "",
+                    "weather_results": "",
+                    "itinerary": "",
+                    "llm_calls": 0
+                },
+                config=config,
+                stream_mode="messages"
+            ):
+                message, metadata = chunk
 
-            if message.content:
-                print(message.content, end="", flush=True)
+                if message.content:
+                    print(message.content, end="", flush=True)
 
-        print("\n")
+            print("\n")
 
     

@@ -1,5 +1,4 @@
-from dis import dis
-from ast import main
+
 import os
 import asyncio
 from langchain_groq import ChatGroq
@@ -96,23 +95,11 @@ async def aviation_mcp_call(tool_name:str,tool_args:dict=None):
 
 
 async def get_airports():
-    await initlize_mcp()
-    tool = aviation_tool.get("list_airports")
-    if not tool:
-        return "Airport tool unavailable"
-    result = await tool.ainvoke({})
+    return await aviation_mcp_call("list_airports")
 
-    return result
-    
 
 async def get_airlines():
-    await initlize_mcp()
-    tool = aviation_tool.get("list_airlines")
-    if not tool:
-        return "Airline tool unavailable"
-    result = await tool.ainvoke({})
-
-    return result
+    return await aviation_mcp_call("list_airlines")
     
 weather_tool = None
 forecast_tool = None
@@ -183,5 +170,10 @@ def extract_destination(query: str):
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    async def _test():
+        print("Testing MCP tools...")
+        tools = await client.get_tools()
+        print("Tools:", [t.name for t in tools])
+
+    asyncio.run(_test())
 

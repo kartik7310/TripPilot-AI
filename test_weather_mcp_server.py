@@ -2,9 +2,8 @@
 from groq import __name
 import os
 import sys
-from typing import TypedDict, Annotated
+from typing import  Annotated
 from langchain_mcp_adapters.client import MultiServerMCPClient
-import operator
 import asyncio
 from dotenv import load_dotenv
 load_dotenv(override=True)
