@@ -153,20 +153,20 @@ llm = ChatGroq(
 
 # Destination Extractor
 
-def extract_destination(query: str):
+# def extract_destination(query: str):
 
-    prompt = f"""
-    Extract only the destination city or country.
+#     prompt = f"""
+#     Extract only the destination city or country.
 
-    Query:
-    {query}
+#     Query:
+#     {query}
 
-    Return only destination name.
-    """
+#     Return only destination name.
+#     """
 
-    response = llm.invoke(prompt)
+#     response = llm.invoke(prompt)
 
-    return response.content.strip()
+#     return response.content.strip()
 
 
 if __name__ == "__main__":
