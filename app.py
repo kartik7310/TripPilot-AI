@@ -181,7 +181,7 @@ for msg in st.session_state.messages:
 # Interactive Human-in-the-Loop Review Box
 if is_interrupted:
     with st.container():
-        st.info("✋ **Human in the Loop: Review Required**\n\nThe draft itinerary has been generated above. Please review it and either approve to finalize or request adjustments:")
+        st.info(" **Review Required**\n\nThe draft itinerary has been generated above. Please review it and either approve to finalize or request adjustments:")
         col1, col2 = st.columns([1, 2])
         with col1:
             if st.button("✅ Approve Itinerary", type="primary", use_container_width=True, key="btn_approve_itin"):
@@ -225,19 +225,6 @@ if user_query or pending_action:
             "messages": [HumanMessage(content=display_user_msg)],
             "user_id": st.session_state.thread_id,
             "user_query": display_user_msg,
-            "trip_constraints": {},
-            "selected_agents": [],
-            "supervisor_reasoning": "",
-            "flight_results": "",
-            "hotel_results": "",
-            "weather_results": "",
-            "budget_results": "",
-            "itinerary": "",
-            "approval_request": "",
-            "human_feedback": "",
-            "approved": False,
-            "final_response": "",
-            "llm_calls": 0,
         }
     
     # Save user message
@@ -265,6 +252,9 @@ if user_query or pending_action:
             with st.status(status_title, expanded=True) as status_box:
                 for step in travel_agent_app.stream(stream_input, config=config, stream_mode="updates"):
                     if "supervisor" in step:
+                        sup_data = step["supervisor"]
+                        if sup_data.get("direct_response"):
+                            final_text = sup_data["direct_response"]
                         status_box.write("🧠 Supervisor analyzed request and routed agents...")
                         
                     elif "flight_agent" in step:
@@ -299,14 +289,21 @@ if user_query or pending_action:
                         if final_msgs:
                             final_text = final_msgs[-1].content
                         agent_details["llm_calls"] = step["final_response"].get("llm_calls", 0)
-                        status_box.write("✨ Final travel plan generated!")
+                        status_box.write("✨ Response generated!")
 
                 # Check if graph paused for approval or finished
                 post_state = travel_agent_app.get_state(config)
-                if post_state.next:
+                if post_state and post_state.values:
+                    agent_details["flight_results"] = post_state.values.get("flight_results") or agent_details["flight_results"]
+                    agent_details["hotel_results"] = post_state.values.get("hotel_results") or agent_details["hotel_results"]
+                    agent_details["weather_results"] = post_state.values.get("weather_results") or agent_details["weather_results"]
+                    agent_details["budget_results"] = post_state.values.get("budget_results") or agent_details["budget_results"]
+                    agent_details["itinerary"] = post_state.values.get("itinerary") or agent_details["itinerary"]
+
+                if post_state and post_state.next:
                     status_box.update(label="📋 Draft ready — waiting for your approval", state="complete", expanded=False)
                 else:
-                    status_box.update(label="✨ Travel plan completed", state="complete", expanded=False)
+                    status_box.update(label="✨ Response completed", state="complete", expanded=False)
 
             if final_text:
                 st.markdown(final_text)

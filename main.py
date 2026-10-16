@@ -49,24 +49,8 @@ if __name__ == "__main__":
                 stream_input = Command(resume=user_input)
             else:
                 stream_input = {
-                    "messages": [
-                        HumanMessage(content=user_input)
-                    ],
-                    "user_id": "user_kartik",
+                    "messages": [HumanMessage(content=user_input)],
                     "user_query": user_input,
-                    "trip_constraints": {},
-                    "selected_agents": [],
-                    "supervisor_reasoning": "",
-                    "flight_results": "",
-                    "hotel_results": "",
-                    "weather_results": "",
-                    "budget_results": "",
-                    "itinerary": "",
-                    "approval_request": "",
-                    "human_feedback": "",
-                    "approved": False,
-                    "final_response": "",
-                    "llm_calls": 0,
                 }
 
             print()
