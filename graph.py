@@ -70,10 +70,16 @@ def build_graph():
     graph.add_edge("final_response", END)
     
     if DATABASE_URL:
-        conn = psycopg.connect(DATABASE_URL)
-        checkpointer = PostgresSaver(conn)
-        checkpointer.setup()
-        return graph.compile(checkpointer=checkpointer)
+        try:
+            conn = psycopg.connect(DATABASE_URL, autocommit=True)
+            checkpointer = PostgresSaver(conn)
+            checkpointer.setup()
+            return graph.compile(checkpointer=checkpointer)
+        except Exception as e:
+            print(f"Warning: PostgresSaver setup failed: {e}")
+            from langgraph.checkpoint.memory import MemorySaver
+            return graph.compile(checkpointer=MemorySaver())
 
-    return graph.compile()
+    from langgraph.checkpoint.memory import MemorySaver
+    return graph.compile(checkpointer=MemorySaver())
 app = build_graph()

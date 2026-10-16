@@ -1,11 +1,8 @@
-
 import os
 import asyncio
-from langchain_groq import ChatGroq
 from dotenv import load_dotenv
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
-#load_dotenv()
 load_dotenv(override=True)
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 AVIATION_STACK_API_KEY = os.getenv("AVIATIONSTACK_API_KEY")
@@ -79,6 +76,8 @@ async def tevely_mcp_search(query:str):
     })
     return result
 
+tavily_mcp_search = tevely_mcp_search
+
 
 async def aviation_mcp_call(tool_name:str,tool_args:dict=None):
     tools = await client.get_tools()
@@ -147,26 +146,7 @@ async def forecast_mcp_search(city: str):
     )
 
 
-llm = ChatGroq(
-    model="openai/gpt-oss-20b"
-)
 
-# Destination Extractor
-
-# def extract_destination(query: str):
-
-#     prompt = f"""
-#     Extract only the destination city or country.
-
-#     Query:
-#     {query}
-
-#     Return only destination name.
-#     """
-
-#     response = llm.invoke(prompt)
-
-#     return response.content.strip()
 
 
 if __name__ == "__main__":

@@ -1,53 +1,60 @@
-from mcp_client import weather_mcp_search
-from mcp_client import extract_destination
-from mcp_client import forecast_mcp_search
-from mcp_client import tevely_mcp_search
 import asyncio
 import json
 from typing import Any
-from langchain_core.messages import (AnyMessage,HumanMessage,AIMessage,SystemMessage,)
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langgraph.types import interrupt
 from config import get_llm
-from mcp_client import current_weather ,forecast_tool,list_airlines,list_airports,tavily_search
+from mcp_client import (
+    weather_mcp_search,
+    forecast_mcp_search,
+    tevely_mcp_search,
+    get_airports,
+    get_airlines,
+    aviation_mcp_call,
+)
 from state import travelState
 from prompts import supervisor_agent_prompt
+
 llm = get_llm()
 
 
-def _llm_text(system:str,prompt:str)->str:
-    response = llm.invoke([SystemMessage(content=system),HumanMessage(content=prompt)])
+def _llm_text(system: str, prompt: str) -> str:
+    response = llm.invoke([SystemMessage(content=system), HumanMessage(content=prompt)])
     return response.content
 
-def _json_from_llm(text:str) -> str | dict[str,Any]:
-  
-        start = text.index("{")
-        end= text.rindex("}")+1
-        json_text =text[start:end]
-        return json.loads(json_text)
+
+def _json_from_llm(text: str) -> str | dict[str, Any]:
+    start = text.index("{")
+    end = text.rindex("}") + 1
+    json_text = text[start:end]
+    return json.loads(json_text)
 
 
-def supervisor_agent(state:travelState):
+def supervisor_agent(state: travelState):
     query = state["user_query"]
-    prompt =supervisor_agent_prompt(query)
-    raw = _llm_text("you route work to specilaist agents,Return strict JSON only ",prompt)
+    prompt = supervisor_agent_prompt(query)
+    raw = _llm_text("you route work to specilaist agents,Return strict JSON only ", prompt)
 
     parsed = _json_from_llm(raw)
-    selected= parsed["selected_agents"]
+    selected = parsed["selected_agents"]
     return {
-        "selected_agents":selected,
-        "trip_constraints":parsed["trip_constraints"],
-        "supervisor_reasoning":parsed["reasoning"],
-        "messages":[AIMessage(content="Supervisor created the agent plan")],
-        "llm_calls  ":state.get("llm_calls", 0) + 1,
-    }  
+        "selected_agents": selected,
+        "trip_constraints": parsed["trip_constraints"],
+        "supervisor_reasoning": parsed["reasoning"],
+        "messages": [AIMessage(content="Supervisor created the agent plan")],
+        "llm_calls": state.get("llm_calls", 0) + 1,
+    }
 
 
 def flight_agent(state: travelState):
     query = state["user_query"]
-    constraints = state["trip_constraints"]
-    destination = constraints["destination"]
-    airports = asyncio.run(list_airports(destination, limit=10))
-    airlines = asyncio.run(list_airlines("", limit=10))
+    constraints = state.get("trip_constraints", {})
+    try:
+        airports = asyncio.run(get_airports())
+        airlines = asyncio.run(get_airlines())
+    except Exception as e:
+        airports = f"Airport data unavailable: {e}"
+        airlines = f"Airline data unavailable: {e}"
     prompt = f"""
 Create flight guidance for this trip.
 
@@ -213,18 +220,21 @@ Make the output structured, practical, and ready for human review.
     )
 
 
-    approval_request = f"""
-Please review this draft travel plan.
+    approval_request = f"""### 📋 Draft Travel Itinerary
 
 {result}
 
-Reply with approval or feedback.
+---
+### ✋ Human in the Loop: Review & Approval Required
+Please review the draft travel plan above.
+- **To approve:** Reply with **"yes"** or **"approve"** to confirm and finalize your itinerary.
+- **To modify:** Reply with your specific feedback or changes (e.g., budget adjustments, activities, or dates).
 """
 
     return {
         "itinerary": result,
         "approval_request": approval_request,
-        "messages": [AIMessage(content="Draft itinerary created for human review.")],
+        "messages": [AIMessage(content=approval_request)],
         "llm_calls": state.get("llm_calls", 0) + 1,
     }
 
@@ -243,44 +253,64 @@ def human_approval_agent(state: travelState):
         }
     )
 
-    approved = feedback["approved"]
-    human_feedback = feedback["feedback"]
+    if isinstance(feedback, dict):
+        approved = bool(feedback.get("approved", True))
+        human_feedback = str(feedback.get("feedback", "") or "")
+    elif isinstance(feedback, bool):
+        approved = feedback
+        human_feedback = ""
+    elif isinstance(feedback, str):
+        cleaned = feedback.strip().lower()
+        if cleaned in ["yes", "y", "approve", "approved", "ok", "looks good", "proceed", "confirmed"]:
+            approved = True
+            human_feedback = ""
+        elif cleaned.startswith("yes") or cleaned.startswith("approve"):
+            approved = True
+            human_feedback = feedback
+        else:
+            approved = False
+            human_feedback = feedback
+    else:
+        approved = True
+        human_feedback = str(feedback) if feedback else ""
+
+    status_msg = "✅ Itinerary approved! Finalizing your complete travel plan..." if approved else f"✏️ Feedback received: '{human_feedback}'. Revising travel plan..."
 
     return {
         "approved": approved,
         "human_feedback": human_feedback,
-        "messages": [AIMessage(content="Human approval step completed.")],
+        "messages": [AIMessage(content=status_msg)],
     }
 
 
-def final_response_agent(state:travelState):
-    if state["approved"]:
+def final_response_agent(state: travelState):
+    if state.get("approved", True):
         prompt = f"""
 The human approved this draft itinerary.
 
 Produce the final polished travel plan.
 
 Draft itinerary:
-{state['itinerary']}
+{state.get('itinerary', '')}
 
 Budget notes:
-{state['budget_results']}
+{state.get('budget_results', '')}
 """
     else:
         prompt = f"""
-The human did not approve the draft.
+The human requested changes to the draft.
 
 Original user request:
-{state['user_query']}
+{state.get('user_query', '')}
 
 Draft itinerary:
-{state['itinerary']}
+{state.get('itinerary', '')}
 
 Human feedback:
-{state['human_feedback']}
+{state.get('human_feedback', '')}
 
 Budget notes:
-{state['budget_results']}
+{state.get('budget_results', '')}
 """
 
     result = _llm_text(

@@ -1,11 +1,9 @@
-from ast import main
 import os
 import asyncio
 
 from dotenv import load_dotenv
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
-#load_dotenv()
 load_dotenv(override=True)
 AVIATION_STACK_API_KEY = os.getenv("AVIATIONSTACK_API_KEY")
 

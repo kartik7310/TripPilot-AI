@@ -2,6 +2,7 @@ import streamlit as st
 import os
 import uuid
 from langchain_core.messages import HumanMessage
+from langgraph.types import Command
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -9,7 +10,7 @@ load_dotenv()
 
 # Import compiled LangGraph agent from existing backend logic
 try:
-    from main import app as travel_agent_app
+    from graph import app as travel_agent_app
     BACKEND_LOADED = True
     BACKEND_ERROR = None
 except Exception as err:
@@ -130,6 +131,22 @@ if not BACKEND_LOADED:
     st.stop()
 
 
+# LangGraph thread configuration
+config = {
+    "configurable": {
+        "thread_id": st.session_state.thread_id
+    }
+}
+
+# Check if graph is paused at an interrupt (e.g. human approval)
+is_interrupted = False
+if BACKEND_LOADED and travel_agent_app:
+    try:
+        curr_state = travel_agent_app.get_state(config)
+        is_interrupted = bool(curr_state.next)
+    except Exception:
+        is_interrupted = False
+
 # Display Conversation History
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
@@ -139,43 +156,96 @@ for msg in st.session_state.messages:
         if msg.get("details"):
             details = msg["details"]
             with st.expander("View search data & source details"):
-                tab1, tab2, tab3, tab4 = st.tabs(["Flight Availability", "Hotel Listings", "Weather Forecast", "Draft Itinerary"])
+                tab1, tab2, tab3, tab4, tab5 = st.tabs(["Flight Availability", "Hotel Listings", "Weather Forecast", "Budget Analysis", "Draft Itinerary"])
                 
                 with tab1:
                     st.markdown("**Flight Search Output**")
-                    st.code(details.get("flight_results", "No flight data available."), language="markdown")
+                    st.code(details.get("flight_results") or "No flight data available.", language="markdown")
                     
                 with tab2:
                     st.markdown("**Hotel Search Output**")
-                    st.code(details.get("hotel_results", "No hotel data available."), language="markdown")
+                    st.code(details.get("hotel_results") or "No hotel data available.", language="markdown")
                     
                 with tab3:
                     st.markdown("**Weather Search Output**")
-                    st.markdown(details.get("weather_results", "No weather data available."))
+                    st.markdown(details.get("weather_results") or "No weather data available.")
 
                 with tab4:
-                    st.markdown("**Itinerary Draft**")
-                    st.markdown(details.get("itinerary", "No itinerary draft available."))
+                    st.markdown("**Budget Analysis**")
+                    st.markdown(details.get("budget_results") or "No budget data available.")
 
+                with tab5:
+                    st.markdown("**Itinerary Draft**")
+                    st.markdown(details.get("itinerary") or "No itinerary draft available.")
+
+# Interactive Human-in-the-Loop Review Box
+if is_interrupted:
+    with st.container():
+        st.info("✋ **Human in the Loop: Review Required**\n\nThe draft itinerary has been generated above. Please review it and either approve to finalize or request adjustments:")
+        col1, col2 = st.columns([1, 2])
+        with col1:
+            if st.button("✅ Approve Itinerary", type="primary", use_container_width=True, key="btn_approve_itin"):
+                st.session_state.pending_action = {"approved": True, "feedback": ""}
+                st.rerun()
+        with col2:
+            with st.expander("✏️ Request Revisions / Add Feedback", expanded=True):
+                user_feedback = st.text_input("Enter change requests:", placeholder="e.g., Change duration to 4 days, adjust budget...", key="feedback_input")
+                if st.button("Submit Revisions", use_container_width=True, key="btn_submit_feedback"):
+                    if user_feedback.strip():
+                        st.session_state.pending_action = {"approved": False, "feedback": user_feedback.strip()}
+                        st.rerun()
+                    else:
+                        st.warning("Please provide your feedback before submitting.")
 
 # Handle User Input
-user_query = st.chat_input("Where would you like to go? (e.g., 5 days in Paris next month)")
+chat_placeholder = "Enter approval ('yes') or feedback/changes..." if is_interrupted else "Where would you like to go? (e.g., 5 days in Paris next month)"
+user_query = st.chat_input(chat_placeholder)
 
 # Check if sample prompt button was clicked
 if st.session_state.sample_prompt:
     user_query = st.session_state.sample_prompt
     st.session_state.sample_prompt = ""
 
+# Check for pending approval button action
+pending_action = st.session_state.pop("pending_action", None)
 
-if user_query:
-    user_query = user_query.strip()
+if user_query or pending_action:
+    if pending_action:
+        if pending_action.get("approved"):
+            display_user_msg = "✅ Approved draft itinerary"
+        else:
+            display_user_msg = f"✏️ Revision requested: {pending_action.get('feedback')}"
+        stream_input = Command(resume=pending_action)
+    elif is_interrupted:
+        display_user_msg = user_query.strip()
+        stream_input = Command(resume=display_user_msg)
+    else:
+        display_user_msg = user_query.strip()
+        stream_input = {
+            "messages": [HumanMessage(content=display_user_msg)],
+            "user_id": st.session_state.thread_id,
+            "user_query": display_user_msg,
+            "trip_constraints": {},
+            "selected_agents": [],
+            "supervisor_reasoning": "",
+            "flight_results": "",
+            "hotel_results": "",
+            "weather_results": "",
+            "budget_results": "",
+            "itinerary": "",
+            "approval_request": "",
+            "human_feedback": "",
+            "approved": False,
+            "final_response": "",
+            "llm_calls": 0,
+        }
     
     # Save user message
-    st.session_state.messages.append({"role": "user", "content": user_query})
+    st.session_state.messages.append({"role": "user", "content": display_user_msg})
     
     # Display user message
     with st.chat_message("user"):
-        st.markdown(user_query)
+        st.markdown(display_user_msg)
 
     # Generate Assistant Response
     with st.chat_message("assistant"):
@@ -184,43 +254,34 @@ if user_query:
             "flight_results": "",
             "hotel_results": "",
             "weather_results": "",
+            "budget_results": "",
             "itinerary": "",
             "llm_calls": 0
         }
         
-        config = {
-            "configurable": {
-                "thread_id": st.session_state.thread_id
-            }
-        }
+        status_title = "Processing your feedback..." if (pending_action or is_interrupted) else "Planning your trip across specialist agents..."
         
-        initial_state = {
-            "messages": [HumanMessage(content=user_query)],
-            "user_query": user_query,
-            "flight_results": "",
-            "hotel_results": "",
-            "weather_results": "",
-            "itinerary": "",
-            "llm_calls": 0
-        }
-
         try:
-            with st.status("Searching flights, hotels, and building your plan...", expanded=True) as status_box:
-                status_box.write("Searching live flight options...")
-                
-                # Stream node updates from LangGraph backend
-                for step in travel_agent_app.stream(initial_state, config=config, stream_mode="updates"):
-                    if "flight_agent" in step:
+            with st.status(status_title, expanded=True) as status_box:
+                for step in travel_agent_app.stream(stream_input, config=config, stream_mode="updates"):
+                    if "supervisor" in step:
+                        status_box.write("🧠 Supervisor analyzed request and routed agents...")
+                        
+                    elif "flight_agent" in step:
                         agent_details["flight_results"] = step["flight_agent"].get("flight_results", "")
-                        status_box.write("Flight options found. Searching top hotels & stays...")
+                        status_box.write("✈️ Flight options gathered. Searching top stays...")
                         
                     elif "hotel_agent" in step:
                         agent_details["hotel_results"] = step["hotel_agent"].get("hotel_results", "")
-                        status_box.write("Hotels found. Checking weather forecast...")
+                        status_box.write("🏨 Hotels found. Checking destination weather...")
 
                     elif "weather_agent" in step:
                         agent_details["weather_results"] = step["weather_agent"].get("weather_results", "")
-                        status_box.write("Weather info fetched. Structuring day-by-day itinerary...")
+                        status_box.write("☀️ Weather forecast fetched. Analyzing budget feasibility...")
+
+                    elif "budget_agent" in step:
+                        agent_details["budget_results"] = step["budget_agent"].get("budget_results", "")
+                        status_box.write("💰 Budget analyzed. Creating draft itinerary...")
                         
                     elif "itinerary_agent" in step:
                         agent_details["itinerary"] = step["itinerary_agent"].get("itinerary", "")
@@ -228,15 +289,31 @@ if user_query:
                         if final_msgs:
                             final_text = final_msgs[-1].content
                         agent_details["llm_calls"] = step["itinerary_agent"].get("llm_calls", 0)
+                        status_box.write("📋 Draft itinerary ready for human review...")
 
-                status_box.update(label="Travel plan ready", state="complete", expanded=False)
+                    elif "human_approval" in step:
+                        status_box.write("👤 Human feedback processed...")
+
+                    elif "final_response" in step:
+                        final_msgs = step["final_response"].get("messages", [])
+                        if final_msgs:
+                            final_text = final_msgs[-1].content
+                        agent_details["llm_calls"] = step["final_response"].get("llm_calls", 0)
+                        status_box.write("✨ Final travel plan generated!")
+
+                # Check if graph paused for approval or finished
+                post_state = travel_agent_app.get_state(config)
+                if post_state.next:
+                    status_box.update(label="📋 Draft ready — waiting for your approval", state="complete", expanded=False)
+                else:
+                    status_box.update(label="✨ Travel plan completed", state="complete", expanded=False)
 
             if final_text:
                 st.markdown(final_text)
                 
                 # Raw search data expander
                 with st.expander("View search data & source details"):
-                    tab1, tab2, tab3, tab4 = st.tabs(["Flight Availability", "Hotel Listings", "Weather Forecast", "Draft Itinerary"])
+                    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Flight Availability", "Hotel Listings", "Weather Forecast", "Budget Analysis", "Draft Itinerary"])
                     
                     with tab1:
                         st.markdown("**Flight Search Output**")
@@ -249,8 +326,12 @@ if user_query:
                     with tab3:
                         st.markdown("**Weather Search Output**")
                         st.markdown(agent_details["weather_results"] or "No weather data found.")
-                        
+
                     with tab4:
+                        st.markdown("**Budget Analysis**")
+                        st.markdown(agent_details["budget_results"] or "No budget data found.")
+                        
+                    with tab5:
                         st.markdown("**Itinerary Draft**")
                         st.markdown(agent_details["itinerary"] or "No itinerary draft available.")
 
@@ -260,6 +341,7 @@ if user_query:
                     "content": final_text,
                     "details": agent_details
                 })
+                st.rerun()
             else:
                 st.error("Completed without returning a travel response.")
 
