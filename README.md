@@ -1,4 +1,4 @@
-# 🧭 Voyage: Multi-Agent Travel Planner with LangGraph & MCP
+# 🧭 TripPilot AI: Multi-Agent Travel Planner with LangGraph & MCP
 
 [![Python Version](https://img.shields.io/badge/Python-3.14%2B-blue.svg)](https://www.python.org/)
 [![Framework](https://img.shields.io/badge/LangGraph-1.2%2B-green.svg)](https://github.com/langchain-ai/langgraph)
@@ -6,7 +6,7 @@
 [![Database](https://img.shields.io/badge/Neon-PostgreSQL-teal.svg)](https://neon.tech/)
 [![Frontend](https://img.shields.io/badge/UI-Streamlit-red.svg)](https://streamlit.io/)
 
-**Voyage** is an autonomous, production-grade multi-agent travel planning system built with **LangGraph**, **LangChain**, and the **Model Context Protocol (MCP)**. It coordinates specialist agents to research live flight schedules, top-rated hotels, destination weather forecasts, and budget constraints to synthesize day-by-day itineraries—featuring interactive **Human-in-the-Loop (HITL)** approval and **context-aware follow-up memory**.
+**TripPilot AI** is an autonomous, production-grade multi-agent travel planning system built with **LangGraph**, **LangChain**, and the **Model Context Protocol (MCP)**. It coordinates specialist agents to research live flight schedules, top-rated hotels, destination weather forecasts, and budget constraints to synthesize day-by-day itineraries—featuring interactive **Human-in-the-Loop (HITL)** approval and **context-aware follow-up memory**.
 
 ---
 
@@ -28,9 +28,9 @@
 
 ## 📖 Overview
 
-Planning a trip involves juggling multiple disparate sources: flight availability, lodging, regional climate, local activities, and financial constraints. Voyage automates this end-to-end using a team of specialized AI agents coordinated by an intelligent supervisor.
+Planning a trip involves juggling multiple disparate sources: flight availability, lodging, regional climate, local activities, and financial constraints. TripPilot AI automates this end-to-end using a team of specialized AI agents coordinated by an intelligent supervisor.
 
-Instead of generating static, unchangeable travel suggestions, Voyage:
+Instead of generating static, unchangeable travel suggestions, TripPilot AI:
 1. **Validates User Input:** Rejects unrelated requests and responds directly to conversational pleasantries.
 2. **Collects Real-Time Data:** Queries live MCP tools for flights (AviationStack), accommodations (Tavily), and weather (OpenWeatherMap).
 3. **Drafts & Pauses for Approval:** Generates a structured draft plan and pauses execution via LangGraph's native `interrupt()`.
@@ -115,7 +115,7 @@ flowchart TD
 
 ## 🛡️ Security & Input Guardrails
 
-Voyage treats all user instructions as untrusted:
+TripPilot AI treats all user instructions as untrusted:
 
 1. **Domain Boundary Enforcement:** Unrelated requests (e.g., coding, writing essays, math, or prompt injections) are intercepted by the supervisor and declined before reaching specialist agents.
 2. **Schema & Agent Name Validation:** Supervisor output must conform to a strict JSON schema. Unknown or hallucinated agent names are filtered out against an allowed whitelist.
@@ -254,7 +254,7 @@ python main.py
 
 ## 🧪 Automated Testing
 
-Voyage includes a test suite covering the 12 core guardrail, routing, and memory scenarios using deterministic mock LLMs:
+TripPilot AI includes a test suite covering the 12 core guardrail, routing, and memory scenarios using deterministic mock LLMs:
 
 ```bash
 python -m unittest test_followup_and_guardrails.py -v
