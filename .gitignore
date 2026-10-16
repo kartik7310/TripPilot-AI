@@ -9,3 +9,6 @@ aviationstack-mcp/
 
 # Virtual environments
 .venv
+
+# Environment variables
+.env
