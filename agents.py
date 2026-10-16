@@ -31,20 +31,126 @@ def _json_from_llm(text: str) -> str | dict[str, Any]:
 
 
 def supervisor_agent(state: travelState):
-    query = state["user_query"]
-    prompt = supervisor_agent_prompt(query)
-    raw = _llm_text("you route work to specilaist agents,Return strict JSON only ", prompt)
+    query = state.get("user_query", "").strip()
 
-    parsed = _json_from_llm(raw)
-    selected = parsed["selected_agents"]
-    return {
-        "selected_agents": selected,
-        "trip_constraints": parsed["trip_constraints"],
-        "supervisor_reasoning": parsed["reasoning"],
-        "messages": [AIMessage(content="Supervisor created the agent plan")],
+    # Build context summary from state
+    trip_context_parts = []
+    constraints = state.get("trip_constraints") or {}
+    if constraints.get("destination"):
+        trip_context_parts.append(f"Destination: {constraints.get('destination')}")
+    if constraints.get("duration"):
+        trip_context_parts.append(f"Duration: {constraints.get('duration')}")
+    if constraints.get("budget"):
+        trip_context_parts.append(f"Budget: {constraints.get('budget')}")
+    if state.get("itinerary"):
+        trip_context_parts.append(f"Itinerary Plan:\n{state.get('itinerary')[:1000]}")
+    if state.get("budget_results"):
+        trip_context_parts.append(f"Budget Details:\n{state.get('budget_results')[:500]}")
+    if state.get("hotel_results"):
+        trip_context_parts.append(f"Hotel Recommendations:\n{state.get('hotel_results')[:500]}")
+    if state.get("flight_results"):
+        trip_context_parts.append(f"Flight Details:\n{state.get('flight_results')[:500]}")
+
+    trip_context_str = "\n".join(trip_context_parts)
+
+    # Format recent conversation messages (last 6 messages)
+    msgs = state.get("messages") or []
+    recent_msgs_formatted = []
+    for m in msgs[-6:]:
+        role = "User" if isinstance(m, HumanMessage) else "Assistant"
+        content = str(m.content)[:300]
+        recent_msgs_formatted.append(f"{role}: {content}")
+    recent_msgs_str = "\n".join(recent_msgs_formatted)
+
+    prompt = supervisor_agent_prompt(
+        query=query,
+        recent_messages=recent_msgs_str,
+        current_trip_context=trip_context_str
+    )
+
+    try:
+        raw = _llm_text(
+            "Classify requests and route travel tasks. Return strict JSON only.",
+            prompt
+        )
+        parsed = _json_from_llm(raw)
+    except Exception as e:
+        parsed = {
+            "request_type": "out_of_scope",
+            "direct_response": "I'm sorry, I couldn't understand that request. How can I help you with your travel planning?",
+            "selected_agents": [],
+            "trip_constraints": {},
+            "reasoning": f"Parsing failed: {e}"
+        }
+
+    valid_types = {"social", "out_of_scope", "travel_new", "travel_followup", "travel_general"}
+    request_type = parsed.get("request_type")
+    if request_type not in valid_types:
+        request_type = "out_of_scope"
+
+    direct_response = parsed.get("direct_response", "").strip()
+
+    # Safe fallback direct responses
+    if request_type == "social" and not direct_response:
+        direct_response = "Hello! I can help you plan your next trip. Where would you like to go?"
+    elif request_type == "out_of_scope" and not direct_response:
+        direct_response = "I'm a travel-planning assistant. I can help with destinations, flights, hotels, budgets, weather, and itineraries."
+
+    allowed_agents = {
+        "flight_agent",
+        "hotel_agent",
+        "weather_agent",
+        "budget_agent",
+        "itinerary_agent",
+    }
+
+    selected_agents = [
+        agent for agent in parsed.get("selected_agents", [])
+        if agent in allowed_agents
+    ]
+
+    # For social or out_of_scope, no specialist agents may run
+    if request_type in {"social", "out_of_scope"}:
+        selected_agents = []
+
+    # Merge or reset constraints
+    new_constraints = parsed.get("trip_constraints", {})
+    if request_type == "travel_new":
+        trip_constraints = new_constraints if isinstance(new_constraints, dict) else {}
+    else:
+        trip_constraints = dict(constraints)
+        if isinstance(new_constraints, dict):
+            for k, v in new_constraints.items():
+                if v:
+                    trip_constraints[k] = v
+
+    # If follow-up references a previous trip that does not exist or cannot be recovered
+    if request_type == "travel_followup" and not trip_context_str and not selected_agents and not direct_response:
+        direct_response = "I don't have a record of a previous trip in our conversation. Which destination or trip are you referring to?"
+
+    update_dict = {
+        "request_type": request_type,
+        "direct_response": direct_response,
+        "selected_agents": selected_agents,
+        "trip_constraints": trip_constraints,
+        "supervisor_reasoning": parsed.get("reasoning", ""),
         "llm_calls": state.get("llm_calls", 0) + 1,
     }
 
+    if direct_response:
+        update_dict["messages"] = [AIMessage(content=direct_response)]
+
+    # If user explicitly starts a new trip, clear previous trip outputs
+    if request_type == "travel_new":
+        update_dict["flight_results"] = ""
+        update_dict["hotel_results"] = ""
+        update_dict["weather_results"] = ""
+        update_dict["budget_results"] = ""
+        update_dict["itinerary"] = ""
+        update_dict["approval_request"] = ""
+        update_dict["final_response"] = ""
+
+    return update_dict
 
 def flight_agent(state: travelState):
     query = state["user_query"]
@@ -225,7 +331,7 @@ Make the output structured, practical, and ready for human review.
 {result}
 
 ---
-### ✋ Human in the Loop: Review & Approval Required
+### Review & Approval Required
 Please review the draft travel plan above.
 - **To approve:** Reply with **"yes"** or **"approve"** to confirm and finalize your itinerary.
 - **To modify:** Reply with your specific feedback or changes (e.g., budget adjustments, activities, or dates).
@@ -284,9 +390,71 @@ def human_approval_agent(state: travelState):
 
 
 def final_response_agent(state: travelState):
-    if state.get("approved", True):
-        prompt = f"""
-The human approved this draft itinerary.
+    request_type = state.get("request_type", "travel_new")
+    user_query = state.get("user_query", "")
+
+    if request_type == "travel_followup":
+        itinerary = state.get("itinerary", "")
+        budget = state.get("budget_results", "")
+        hotels = state.get("hotel_results", "")
+        flights = state.get("flight_results", "")
+        constraints = state.get("trip_constraints", {})
+
+        if not (itinerary or budget or hotels or flights):
+            result = "I couldn't find a previously planned trip in our conversation. Please specify the destination or trip details you would like to ask about."
+        else:
+            prompt = f"""Answer the user's follow-up question using the previously established trip details below.
+Do NOT invent hotels, prices, flights, dates, or activities that were not in the provided trip information.
+
+User Question:
+{user_query}
+
+Trip Constraints:
+{constraints}
+
+Planned Itinerary:
+{itinerary}
+
+Hotel Recommendations:
+{hotels}
+
+Flight Information:
+{flights}
+
+Budget Details:
+{budget}
+
+Provide a direct, accurate, and concise answer to the question using the existing information above.
+"""
+            result = _llm_text(
+                "You are a helpful travel assistant answering a follow-up question based strictly on the existing trip plan.",
+                prompt,
+            )
+
+    elif request_type == "travel_general":
+        weather = state.get("weather_results", "")
+        flights = state.get("flight_results", "")
+        prompt = f"""Answer the user's travel question directly, practically, and concisely.
+Do NOT generate a full day-by-day itinerary unless explicitly asked.
+
+User Question:
+{user_query}
+
+Weather / MCP Data (if available):
+{weather}
+
+Flight / MCP Data (if available):
+{flights}
+
+Provide helpful, accurate travel advice.
+"""
+        result = _llm_text(
+            "You are a helpful travel planning specialist answering an independent travel question.",
+            prompt,
+        )
+
+    elif state.get("approved", True):
+        prompt = f"""The human approved this draft itinerary.
 
 Produce the final polished travel plan.
 
@@ -296,9 +464,13 @@ Draft itinerary:
 Budget notes:
 {state.get('budget_results', '')}
 """
+        result = _llm_text(
+            "You produce final user-ready travel plans.",
+            prompt,
+        )
+
     else:
-        prompt = f"""
-The human requested changes to the draft.
+        prompt = f"""The human requested changes to the draft.
 
 Original user request:
 {state.get('user_query', '')}
@@ -312,11 +484,10 @@ Human feedback:
 Budget notes:
 {state.get('budget_results', '')}
 """
-
-    result = _llm_text(
-        "You produce final user-ready travel plans.",
-        prompt,
-    )
+        result = _llm_text(
+            "You produce final user-ready travel plans.",
+            prompt,
+        )
 
     return {
         "final_response": result,
